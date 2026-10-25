@@ -1,0 +1,22 @@
+#docker-compose.yml:One YAML file that describes our containers, 
+#so we start everything with one command.
+#image:A ready-made package, like an installer. postgres:16 is an official image.
+#container:A running copy of an image. It’s like an installed program that’s switched on.
+#portmapping: Connects a door on your PC to a door inside the container. 5433:5432 means: knock on 5433 on Windows to reach Postgres on 5432 inside the box.
+#volume: A storage space that survives when the container is deleted. Without one, your database is wiped every time.
+services:                                  # the list of containers in this project
+  postgres:                                # our service's name (we pick it)
+    image: postgres:16                     # official Postgres image, version 16 (pinned so it never changes by surprise)
+    container_name: velib-postgres         # fixed name, easier to type in commands
+    environment:                           # settings Postgres reads on first start
+      POSTGRES_USER: ${POSTGRES_USER}      # ${...} = value taken from the .env file
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}          # database created automatically
+    ports:
+      - "5433:5432"                        # your PC's 5433 -> container's 5432 (5432 is taken by your local Postgres)
+    volumes:
+      - pgdata:/var/lib/postgresql/data    # store the database files in the "pgdata" volume, so data survives restarts
+    restart: unless-stopped                # start again automatically when Docker starts, unless you stopped it yourself
+
+volumes:
+  pgdata:                                  # declare the named volume; Docker manages where it lives
