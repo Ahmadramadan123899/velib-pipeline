@@ -1,5 +1,6 @@
 import json
 import requests #HTTP Requests 
+import gzip
 from datetime import datetime, timezone #timezone-timestamps
 from pathlib import Path #clean, cross-platform file paths 
 #Configuration:
@@ -9,7 +10,8 @@ FEEDS={
     "station_information":f"{BASE_URL}/station_information.json",
     "station_status":f"{BASE_URL}/station_status.json"
 }
-RAW_DIR=Path("data")/"raw" #folder path points to data/raw 
+PROJECT_ROOT=Path(__file__).resolve().parent.parent
+RAW_DIR=PROJECT_ROOT/"data"/"raw" #now always points to velib-pipeline/data/raw, wherever we run from 
 TIMEOUT_SECONDS=10 #API doesnt answer within 10seconds
 #This function downloads the data from a url and return it as a python dictionnary  
 def fetch_feed(url:str)->dict:
@@ -20,8 +22,8 @@ def fetch_feed(url:str)->dict:
 def save_raw(payload:dict,feed_name:str,fetched_at:datetime)->Path:
     folder=RAW_DIR/feed_name/fetched_at.strftime("%Y-%m-%d") #data/raw/station_status/2026-10-25
     folder.mkdir(parents=True, exist_ok=True) 
-    file_path=folder/fetched_at.strftime("T%H%M%SZ.json")
-    with open(file_path,"w",encoding="utf-8") as f:
+    file_path=folder/fetched_at.strftime("T%H%M%SZ.json.gz")
+    with gzip.open(file_path,"wt",encoding="utf-8") as f:
         json.dump(payload,f,ensure_ascii=False)
     return file_path
 
