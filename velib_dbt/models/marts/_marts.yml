@@ -1,0 +1,25 @@
+version: 2
+
+models:
+  - name: dim_stations
+    columns:
+      - name: station_id
+        data_tests:
+          - unique
+          - not_null
+      - name: real_capacity
+        data_tests:
+          - not_null
+
+  - name: fct_station_hourly
+    columns:
+      - name: station_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_stations')
+                field: station_id
+      - name: hour_utc
+        data_tests:
+          - not_null

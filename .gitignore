@@ -5,3 +5,4 @@ logs/
 .env
 target/
 dbt_packages/
+.user.yml
