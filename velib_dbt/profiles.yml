@@ -1,0 +1,13 @@
+#how to connect to postgresql
+velib:                          # must match "profile:" in dbt_project.yml
+  target: dev                   # default environment
+  outputs:
+    dev:
+      type: postgres
+      host: localhost
+      port: 5433                                      # our Docker Postgres
+      user: "{{ env_var('POSTGRES_USER') }}"          # read from environment variables,
+      password: "{{ env_var('POSTGRES_PASSWORD') }}"  # so no password in this file
+      dbname: "{{ env_var('POSTGRES_DB') }}"
+      schema: analytics         # dbt builds everything in a separate "analytics" schema
+      threads: 4                # how many models it can build at the same time

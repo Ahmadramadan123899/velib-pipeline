@@ -1,0 +1,9 @@
+#tells the dbt where the raw tables are 
+version: 2
+
+sources:
+  - name: velib                 # a name we choose for this group of raw tables
+    schema: public              # where they live in Postgres
+    tables:
+      - name: stations
+      - name: station_status

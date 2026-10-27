@@ -1,0 +1,14 @@
+#project setting
+name: velib                     # project name
+version: "1.0.0"
+profile: velib                  # which connection to use (defined in profiles.yml)
+
+model-paths: ["models"]         # where the .sql models are
+clean-targets: ["target", "dbt_packages"]   # folders "dbt clean" deletes
+
+models:
+  velib:
+    staging:
+      +materialized: view       # staging = views (always fresh, take no space)
+    marts:
+      +materialized: table      # marts = real tables (fast for Power BI)

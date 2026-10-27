@@ -1,0 +1,22 @@
+#tests
+version: 2
+
+models:
+  - name: stg_stations
+    columns:
+      - name: station_id
+        data_tests:
+          - unique              # no station twice
+          - not_null            # every row has an id
+
+  - name: stg_station_status
+    columns:
+      - name: station_id
+        data_tests:
+          - not_null
+          - relationships:      # every station_id must exist in stg_stations
+              to: ref('stg_stations')
+              field: station_id
+      - name: snapshot_at
+        data_tests:
+          - not_null
