@@ -34,6 +34,7 @@ select
     extract(isodow from h.hour_paris)::int      as day_of_week, -- 1 = Monday ... 7 = Sunday
     extract(hour from h.hour_paris)::int        as hour_of_day, -- 0 to 23, Paris time
     extract(isodow from h.hour_paris) in (6, 7) as is_weekend,
+    h.hour_paris::date                          as date_paris, -- the day, in Paris time, for filters
     round(100.0*h.avg_bikes/nullif(a.real_capacity, 0), 1) as pct_fill -- nullif(x, 0) avoids "division by zero" if a capacity is 0
 from hourly h
 join active_stations a using (station_id)
