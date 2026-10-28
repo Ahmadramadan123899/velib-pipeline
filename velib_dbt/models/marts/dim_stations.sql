@@ -6,7 +6,8 @@ with status_stats as (
     -- What we have actually seen at each station, across all snapshots
     select
         station_id,
-        max(bikes_available + docks_available) as max_observed_total,  -- most bikes + free docks ever seen
+        percentile_disc(0.95) within group (order by bikes_available + docks_available)
+                                               as p95_observed_total,  -- ignores the top 5% (rare glitches)
         max(last_reported)                     as last_reported,       -- most recent report from the station
         max(snapshot_at)                       as last_seen_at         -- most recent snapshot we have
     from {{ ref('stg_station_status') }}      -- ref() = "use another dbt model" (source() was for raw tables)
@@ -20,8 +21,8 @@ select
     s.latitude,
     s.longitude,
     s.official_capacity,
-    greatest(s.official_capacity, st.max_observed_total) as real_capacity,      -- the bigger of the two
-    coalesce(st.max_observed_total > s.official_capacity, false) as capacity_was_wrong,
+    greatest(s.official_capacity, st.p95_observed_total) as real_capacity,      -- the bigger of the two
+    coalesce(st.p95_observed_total > s.official_capacity, false) as capacity_was_wrong,
     st.last_reported,
     coalesce(st.last_reported < st.last_seen_at - interval '24 hours', true) as is_ghost
     -- ghost = no report in the 24h before our latest snapshot (or never reported at all)
