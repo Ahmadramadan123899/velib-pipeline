@@ -14,9 +14,10 @@ models:
       - name: station_id
         data_tests:
           - not_null
-          - relationships:      # every station_id must exist in stg_stations
-              to: ref('stg_stations')
-              field: station_id
+          - relationships:
+              arguments:
+                to: ref('stg_stations')
+                field: station_id
       - name: snapshot_at
         data_tests:
           - not_null
