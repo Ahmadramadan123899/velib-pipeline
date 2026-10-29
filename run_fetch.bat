@@ -11,6 +11,5 @@ REM Create a logs folder the first time
 REM Use the venv's Python directly (no need to "activate").
 REM >> appends normal output to the log; 2>&1 sends errors there too.
 
-.venv\Scripts\python.exe src\fetch_snapshot.py >> logs\fetch.log 2>&1
 .venv\Scripts\python.exe src\load_raw.py >> logs\load.log 2>&1
 REM Step 2 runs even if step 1 failed: it still loads any backlog.

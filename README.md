@@ -32,7 +32,43 @@ problem called rebalancing: Vélib' has to move bikes around by truck.
 | 10h | 8.4% | 4.5% |
 | 18h | 6.2% | 1.6% |
 
+**The empty stations are on the hills.** On the map at 9h, most empty stations are around
+Montmartre and Belleville / Ménilmontant: areas where people live, and on top of a hill.
+People ride down to work in the morning, but very few ride back up. The full stations are
+in the center and in the lower, flatter parts of the city.
+
+**I can't say anything about weekends yet.** The pipeline started on a Sunday at 17h,
+so the only weekend data I have is one Sunday evening. I need a few full weekends before
+comparing them with weekdays.
+
 These numbers are from the first few days only, so they will change as more data comes in.
+
+## The dashboard
+
+Made in Power BI, on top of the dbt tables (file: `dashboard/velib.pbix`).
+
+**Page 1: when do stations run empty or full?**
+The share of empty and full stations for each hour of the day, with filters for the date
+and weekday / weekend.
+
+![Commute chart](docs/dashboard_commute.png)
+
+**Page 2: where?**
+Every station placed by its coordinates and colored by how often it's empty (or full)
+at the hour you pick.
+
+![Station map](docs/dashboard_map.png)
+
+A few things I was careful about:
+
+- Percentages are averaged, never added up.
+- One scale for both lines, starting at 0, so the chart doesn't make small changes look big.
+- Closed stations don't count as empty or full. A closed station with 0 bikes isn't
+  "empty", it's just closed.
+- The date and weekend filters are shared by both pages.
+- The built-in map visual needs a work or school Microsoft account, so I used a scatter
+  chart with longitude and latitude instead. No streets in the background, but every
+  station is in the right place.
 
 ## How it works
 
@@ -43,6 +79,8 @@ Vélib' API  -->  fetch_snapshot.py  -->  data/raw/ (compressed files)
                                                                 |
                                                           dbt models
                                                     (staging --> marts)
+                                                                |
+                                                           Power BI
 ```
 
 Fetching and loading run every 5 minutes with Windows Task Scheduler.
@@ -81,17 +119,22 @@ dbt builds clean tables from the raw ones, in a separate `analytics` schema, so 
 data is never touched.
 
 - **Staging** (views): light cleaning. Clearer column names, Paris time next to UTC,
-  and a flag for stations that haven't reported in 24 hours.
-- **Marts** (tables), the ones the dashboard and the model will use:
+  a flag for stations that haven't reported in 24 hours, and a flag for closed stations.
+- **Marts** (tables), the ones the dashboard and the model use:
   - `dim_stations`: one row per station, with its real capacity and a flag for dead stations
   - `fct_station_hourly`: one row per station per hour: average bikes, % of time empty,
-    % of time full, how full the station was
+    % of time full, % of time closed, how full the station was
 
 Dead stations are removed in dbt, not in the dashboard, so every report built on these
 tables gets the same numbers.
 
 There are 17 dbt tests: no missing ids, no duplicates, every station in the status data
 exists in the station list, percentages between 0 and 100, and one row per station per hour.
+
+### 4. Dashboard
+
+Power BI reads the two marts (Import mode) and links them by `station_id`. The dashboard
+doesn't refresh by itself yet: I run `dbt build`, then click Refresh in Power BI.
 
 ### Some choices I made
 
@@ -100,8 +143,8 @@ exists in the station list, percentages between 0 and 100, and one row per stati
 - **All times are stored in UTC.** Paris time moves by one hour twice a year
   (it actually happened while I was building this: 2:00 to 3:00 AM happened twice).
   I store UTC and only convert to Paris time for analysis.
-- **Files are compressed with gzip.** One run is about 750 KB of JSON, so around 200 MB a day.
-  Compressed, it's about 10 times smaller.
+- **Files are compressed with gzip.** One run is about 800 KB of JSON. Compressed, it's
+  about 95 KB, so around 8 times smaller (the status file even shrinks 16 times).
 - **Fetching and loading are two separate steps.** Getting the data only needs the internet,
   loading only needs the database. One failing doesn't stop the other.
 - **No foreign key between `station_status` and `stations`.** When Vélib' opens a new station,
@@ -140,6 +183,18 @@ counted.
 **Some stations stopped reporting.** About 17 stations hadn't sent any update in more than
 24 hours, some not since 2017. They are left out of the hourly table.
 
+**Some stations are closed.** About 2% of the time, a station is closed (not renting or not
+taking bikes back). On a normal day that's 4 to 6 stations. But on Sunday 25 October between
+17h and 22h, 149 stations were closed at the same time. It happened once, so it looks like
+an incident and not a pattern.
+
+## A bug I found in my own pipeline
+
+When I checked how many files I had, I found about 570 snapshots a day instead of 288.
+The fetch line was written twice in `run_fetch.bat`, so every run saved two snapshots one
+second apart. The data itself was fine (just duplicated), but it took twice the space and
+made the "12 snapshots per hour" count wrong. I removed the extra line.
+
 ## Project structure
 
 ```
@@ -154,6 +209,9 @@ velib-pipeline/
 │   ├── models/staging/     # light cleaning (views)
 │   ├── models/marts/       # final tables
 │   └── tests/              # custom tests
+├── dashboard/
+│   └── velib.pbix          # Power BI dashboard
+├── docs/                   # dashboard screenshots
 ├── docker-compose.yml      # PostgreSQL in Docker
 ├── .env.example            # database settings to copy into .env
 ├── run_fetch.bat           # what Task Scheduler runs every 5 minutes
@@ -203,13 +261,16 @@ To run the pipeline every 5 minutes (change the path to where you cloned it):
 schtasks /create /tn "VelibFetch" /tr "C:\path\to\velib-pipeline\run_fetch.bat" /sc minute /mo 5
 ```
 
+To see the dashboard, open `dashboard/velib.pbix` in Power BI Desktop. It connects to
+`localhost:5433`, database `velib`.
+
 ## Plan
 
 - [x] Get the data every 5 minutes and keep the raw files
 - [x] Load it into PostgreSQL (running in Docker) and add data quality checks
 - [x] Build clean tables with dbt
-- [ ] Make a dashboard in Power BI: empty and full stations, rush hours, weather
-- [ ] Predict the number of bikes per station one hour ahead
+- [x] Make a dashboard in Power BI: when and where stations run empty or full
+- [ ] Predict the number of bikes per station one hour ahead (with the weather)
 - [ ] Later: Airflow, tests, CI
 
 ## Data source
