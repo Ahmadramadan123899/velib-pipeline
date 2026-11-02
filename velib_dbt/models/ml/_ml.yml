@@ -1,0 +1,11 @@
+version: 2
+
+models:
+  - name: ml_training_hourly
+    columns:
+      - name: target_bikes
+        data_tests:
+          - not_null
+      - name: bikes_last_hour
+        data_tests:
+          - not_null
