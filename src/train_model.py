@@ -15,7 +15,6 @@ TEST_HOURS = 48  # the most recent 48 hours are kept for testing
 
 # What the model is allowed to see. All known BEFORE the target hour.
 FEATURES = [
-    "station_id",  # which station (the model learns each station's habits)
     "hour_of_day",  # hour of the target hour, Paris time
     "day_of_week",  # 1 = Monday ... 7 = Sunday
     "is_weekend",  # weekend = no commute
@@ -28,6 +27,10 @@ FEATURES = [
     "bikes_same_hour_yesterday",  # T-24h
     "trend_last_hour",  # going up or down? (made below)
 ]
+
+USE_STATION_ID = False  # tested both: same score on valid, so we keep the simpler model
+if USE_STATION_ID:
+    FEATURES = ["station_id"] + FEATURES  # which station (the model learns each station's habits)
 
 
 def load_data() -> pd.DataFrame:
@@ -58,23 +61,44 @@ def prepare(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def split_by_time(df: pd.DataFrame):
-    """Train on the past, test on the most recent hours. Never shuffle time."""
-    cutoff = df["target_hour_utc"].max() - pd.Timedelta(hours=TEST_HOURS)
-    train = df[df["target_hour_utc"] <= cutoff]
-    test = df[df["target_hour_utc"] > cutoff]
-    return train, test, cutoff
+    """train = the past | valid = 24h to make choices | test = last 48h, final score only."""
+    test_start = df["target_hour_utc"].max() - pd.Timedelta(hours=TEST_HOURS)
+    valid_start = test_start - pd.Timedelta(hours=24)
+    train = df[df["target_hour_utc"] <= valid_start]
+    valid = df[(df["target_hour_utc"] > valid_start) & (df["target_hour_utc"] <= test_start)]
+    test = df[df["target_hour_utc"] > test_start]
+    return train, valid, test
 
 
 def main() -> None:
     df = prepare(load_data())
-    train, test, cutoff = split_by_time(df)
-    print(f"Rows: {len(df):,} | train: {len(train):,} | test: {len(test):,} | test starts after {cutoff:%Y-%m-%d %H:%M} UTC")
+    train, valid, test = split_by_time(df)
+    print(f"train: {len(train):,} | valid: {len(valid):,} | test: {len(test):,} | station_id: {USE_STATION_ID}")
 
-    # 500 small trees, each one fixing the errors of the previous ones
-    model = lgb.LGBMRegressor(n_estimators=500, learning_rate=0.05, num_leaves=63, verbose=-1, importance_type="gain")
     # Learn the CHANGE (bikes arriving or leaving), not the level
     train_change = train[TARGET] - train["bikes_last_hour"]
-    model.fit(train[FEATURES], train_change)  # NaN (missing hours) is handled by LightGBM
+    valid_change = valid[TARGET] - valid["bikes_last_hour"]
+
+    model = lgb.LGBMRegressor(
+        n_estimators=2000,  # upper limit; early stopping decides the real number
+        learning_rate=0.05,
+        num_leaves=31,  # simpler trees than before (63)
+        min_child_samples=100,  # each leaf needs at least 100 rows: no rules from tiny groups
+        verbose=-1,
+        importance_type="gain",  # importance = how much each feature reduced the error
+    )
+    model.fit(
+        train[FEATURES], train_change,
+        eval_X=(valid[FEATURES],),  # watch the error on valid while training
+        eval_y=(valid_change,),
+        eval_metric="l1",  # l1 = MAE
+        callbacks=[lgb.early_stopping(50, verbose=False)],  # stop if no progress for 50 trees
+    )
+    print(f"Trees kept by early stopping: {model.best_iteration_}")
+
+    # Valid score: this is what we use to compare experiments
+    pred_valid = (valid["bikes_last_hour"] + model.predict(valid[FEATURES])).clip(lower=0)
+    print(f"VALID  baseline: {mean_absolute_error(valid[TARGET], valid['bikes_last_hour']):.3f} | model: {mean_absolute_error(valid[TARGET], pred_valid):.3f}")
 
     # prediction = last hour + predicted change
     pred = (test["bikes_last_hour"] + model.predict(test[FEATURES])).clip(lower=0)  # a station can't have -1 bike
