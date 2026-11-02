@@ -6,3 +6,5 @@ logs/
 target/
 dbt_packages/
 .user.yml
+reports/*.csv
+~$*
