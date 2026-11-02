@@ -7,3 +7,5 @@ sources:
     tables:
       - name: stations
       - name: station_status
+      - name: weather_hourly    # Paris weather from Open-Meteo (src/fetch_weather.py)
+      

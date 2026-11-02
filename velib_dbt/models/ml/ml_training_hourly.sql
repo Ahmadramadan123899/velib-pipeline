@@ -16,6 +16,12 @@ with hourly as (
     from {{ ref('fct_station_hourly') }}
 ),
 
+weather as (
+    select hour_utc, temperature_c, precipitation_mm, wind_speed_kmh
+    from {{ ref('stg_weather') }}
+),
+
+
 stations as (
     select station_id, real_capacity
     from {{ ref('dim_stations') }}
@@ -38,6 +44,12 @@ select
     h1.pct_time_full          as pct_full_last_hour,
     h2.avg_bikes              as bikes_2h_ago,              -- T-2
     d1.avg_bikes              as bikes_same_hour_yesterday, -- T-24h
+    
+    -- weather: T-1 is measured; T stands in for the forecast (1h-ahead forecasts are very close)
+    w1.precipitation_mm       as rain_last_hour_mm,
+    w.precipitation_mm        as rain_mm,
+    w.temperature_c,
+    w.wind_speed_kmh,
 
     -- target: what we want to predict
     t.avg_bikes               as target_bikes
@@ -54,6 +66,11 @@ left join hourly h2
 left join hourly d1
     on  d1.station_id = t.station_id
     and d1.hour_utc   = t.hour_utc - interval '24 hours'
+-- weather can be missing for an hour: left join, LightGBM handles the nulls
+left join weather w
+    on  w.hour_utc  = t.hour_utc
+left join weather w1
+    on  w1.hour_utc = t.hour_utc - interval '1 hour'
 join stations s
     on  s.station_id = t.station_id
 -- skip hours where the station was mostly closed: nothing to predict there

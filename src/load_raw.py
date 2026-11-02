@@ -9,6 +9,7 @@ from dotenv import load_dotenv #loads .env into environment variables
 #Configuration
 PROJECT_ROOT = Path(__file__).resolve().parent.parent  #same trick as the fetcher: works from any folder
 RAW_DIR = PROJECT_ROOT/"data"/"raw" #where the raw files are
+VELIB_FEEDS = ("station_information", "station_status") #other folders (like weather) have their own loader
 
 load_dotenv(PROJECT_ROOT/".env") #put POSTGRES_USER,POSTGRES_PASSWORD... into os.environ
 
@@ -143,6 +144,8 @@ def main() -> None:
         new_files = []
         for path in sorted(RAW_DIR.rglob("*.json*")): #every .json and .json.gz, in all subfolders
             file_key = path.relative_to(RAW_DIR).as_posix() #short name with "/" (same on Windows & Linux)
+            if file_key.split("/")[0] not in VELIB_FEEDS: #skip folders that are not Velib' feeds
+                continue
             if file_key not in already_loaded:
                 new_files.append((path, file_key))
         #sorted() puts station_information before station_status, and dates in order

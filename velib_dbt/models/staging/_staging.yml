@@ -21,3 +21,9 @@ models:
       - name: snapshot_at
         data_tests:
           - not_null
+  - name: stg_weather
+    columns:
+      - name: hour_utc
+        data_tests:
+          - unique        # one row per hour
+          - not_null

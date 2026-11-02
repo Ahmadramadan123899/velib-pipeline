@@ -28,6 +28,17 @@ FEATURES = [
     "trend_last_hour",  # going up or down? (made below)
 ]
 
+WEATHER_FEATURES = [
+    "rain_last_hour_mm",  # measured rain during T-1
+    "rain_mm",  # rain during T (stands in for the forecast)
+    "temperature_c",
+    "wind_speed_kmh",
+]
+
+USE_WEATHER = False  # tested: no gain on valid with 2 weeks of data; retry with more data
+if USE_WEATHER:
+    FEATURES = FEATURES + WEATHER_FEATURES
+
 USE_STATION_ID = False  # tested both: same score on valid, so we keep the simpler model
 if USE_STATION_ID:
     FEATURES = ["station_id"] + FEATURES  # which station (the model learns each station's habits)
@@ -73,7 +84,7 @@ def split_by_time(df: pd.DataFrame):
 def main() -> None:
     df = prepare(load_data())
     train, valid, test = split_by_time(df)
-    print(f"train: {len(train):,} | valid: {len(valid):,} | test: {len(test):,} | station_id: {USE_STATION_ID}")
+    print(f"train: {len(train):,} | valid: {len(valid):,} | test: {len(test):,} | station_id: {USE_STATION_ID} | weather: {USE_WEATHER}")
 
     # Learn the CHANGE (bikes arriving or leaving), not the level
     train_change = train[TARGET] - train["bikes_last_hour"]
