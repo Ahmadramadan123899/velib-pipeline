@@ -1,17 +1,14 @@
 import gzip #read .json.gz files
 import json #parse JSON text into Python dicts
-import os #read environment variables (our .env values)
 from datetime import datetime, timezone #timestamps
 from pathlib import Path #file paths
 import psycopg #PostgreSQL driver
-from dotenv import load_dotenv #loads .env into environment variables
+from db import get_connection
 
 #Configuration
 PROJECT_ROOT = Path(__file__).resolve().parent.parent  #same trick as the fetcher: works from any folder
 RAW_DIR = PROJECT_ROOT/"data"/"raw" #where the raw files are
 VELIB_FEEDS = ("station_information", "station_status") #other folders (like weather) have their own loader
-
-load_dotenv(PROJECT_ROOT/".env") #put POSTGRES_USER,POSTGRES_PASSWORD... into os.environ
 
 #writting the SQL statements
 #Upsert: insert the station, or if it already exists, update it with the latest values.
@@ -41,19 +38,6 @@ INSERT_STATUS = """
 
 #Remember that a file is done.
 INSERT_LOADED_FILE = "INSERT INTO loaded_files (file_path, row_count) VALUES (%s, %s)"
-
-
-#helpers
-def get_connection() -> psycopg.Connection:
-    return psycopg.connect(
-        host="localhost", #Docker exposes Postgres on our own PC...
-        port=5433, #...on port 5433 (see docker-compose.yml)
-        dbname=os.environ["POSTGRES_DB"], #values come from .env
-        user=os.environ["POSTGRES_USER"],
-        password=os.environ["POSTGRES_PASSWORD"],
-        autocommit=True, #each "with conn.transaction()" below becomes its own real transaction
-    )
-
 
 def read_json(path: Path) -> dict:
     if path.suffix == ".gz":  #new compressed files
@@ -137,7 +121,7 @@ def load_file(conn: psycopg.Connection, path: Path, file_key: str) -> int:
 
 #Main
 def main() -> None:
-    with get_connection() as conn: #connection closes automatically at the end
+    with get_connection(autocommit=True) as conn: #autocommit: each "with conn.transaction()" is its own transaction
         already_loaded = {row[0] for row in conn.execute("SELECT file_path FROM loaded_files")}
         #a set=very fast "is this in there?" checks
 

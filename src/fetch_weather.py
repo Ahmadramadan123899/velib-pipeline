@@ -1,17 +1,13 @@
 import gzip  # save the raw answer compressed
 import json  # read/write JSON
-import os  # read environment variables (.env values)
 from datetime import datetime, timezone  # timestamps
 from pathlib import Path  # file paths
-
-import psycopg  # PostgreSQL driver
+from db import get_connection
 import requests  # HTTP calls
-from dotenv import load_dotenv  # loads .env into environment variables
 
 # Configuration
 PROJECT_ROOT = Path(__file__).resolve().parent.parent  # works from any folder
 RAW_DIR = PROJECT_ROOT / "data" / "raw" / "weather"  # raw answers, like the Velib' feeds
-load_dotenv(PROJECT_ROOT / ".env")
 
 # Open-Meteo: free, no API key. This is the URL from the website, split into pieces.
 URL = "https://api.open-meteo.com/v1/forecast"
@@ -75,13 +71,7 @@ def main() -> None:
     payload = fetch()
     file_path = save_raw(payload, fetched_at)  # 1. save raw first (we can always replay it)
     rows = to_rows(payload)  # 2. lists -> rows
-    with psycopg.connect(
-        host="localhost",
-        port=5433,
-        dbname=os.environ["POSTGRES_DB"],
-        user=os.environ["POSTGRES_USER"],
-        password=os.environ["POSTGRES_PASSWORD"],
-    ) as conn:
+    with get_connection() as conn:
         with conn.cursor() as cur:
             cur.executemany(UPSERT, rows)  # 3. one upsert per hour
         # leaving the "with conn" block commits everything at once

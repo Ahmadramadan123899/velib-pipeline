@@ -4,8 +4,8 @@ velib:                          # must match "profile:" in dbt_project.yml
   outputs:
     dev:
       type: postgres
-      host: localhost
-      port: 5433                                      # our Docker Postgres
+      host: "{{ env_var('POSTGRES_HOST', 'localhost') }}"          # localhost on my PC, postgres in Docker
+      port: "{{ env_var('POSTGRES_PORT', '5433') | as_number }}"   # as_number: text -> number
       user: "{{ env_var('POSTGRES_USER') }}"          # read from environment variables,
       password: "{{ env_var('POSTGRES_PASSWORD') }}"  # so no password in this file
       dbname: "{{ env_var('POSTGRES_DB') }}"

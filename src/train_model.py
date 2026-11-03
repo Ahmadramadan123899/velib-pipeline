@@ -1,15 +1,11 @@
-import os  # read environment variables (.env values)
 from pathlib import Path  # file paths
-
 import lightgbm as lgb  # gradient boosting model
 import pandas as pd  # tables in Python
-import psycopg  # PostgreSQL driver
-from dotenv import load_dotenv  # loads .env into environment variables
 from sklearn.metrics import mean_absolute_error  # MAE = average error in bikes
 from datetime import datetime, timezone  # when the model was trained
+from db import get_connection
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent  # src/ -> project root
-load_dotenv(PROJECT_ROOT / ".env")  # same database settings as load_raw.py
 
 TARGET = "target_bikes"  # what we want to predict
 TEST_HOURS = 48  # the most recent 48 hours are kept for testing
@@ -47,13 +43,7 @@ if USE_STATION_ID:
 
 def load_data() -> pd.DataFrame:
     """Read the training table from PostgreSQL into a pandas table."""
-    with psycopg.connect(
-        host="localhost",
-        port=5433,
-        dbname=os.environ["POSTGRES_DB"],
-        user=os.environ["POSTGRES_USER"],
-        password=os.environ["POSTGRES_PASSWORD"],
-    ) as conn:
+    with get_connection() as conn:
         cur = conn.execute("select * from analytics.ml_training_hourly")
         rows = cur.fetchall()  # all rows, as a list of tuples
         columns = [c.name for c in cur.description]  # column names
@@ -91,13 +81,7 @@ def save_predictions(test: pd.DataFrame, pred: pd.Series) -> None:
         test["bikes_last_hour"],  # baseline
         test[TARGET],  # truth
     )
-    with psycopg.connect(
-        host="localhost",
-        port=5433,
-        dbname=os.environ["POSTGRES_DB"],
-        user=os.environ["POSTGRES_USER"],
-        password=os.environ["POSTGRES_PASSWORD"],
-    ) as conn:
+    with get_connection() as conn:
         with conn.transaction():  # delete + insert together: never an empty table halfway
             conn.execute("DELETE FROM predictions_hourly")
             with conn.cursor() as cur:

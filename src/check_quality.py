@@ -1,11 +1,8 @@
-import os  #read .env values
 import sys  #to exit with an error code
 from pathlib import Path
-import psycopg
-from dotenv import load_dotenv
+from db import get_connection
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-load_dotenv(PROJECT_ROOT / ".env")
 
 #The checks
 #Each check = (description, severity, SQL that returns ONE number: how many bad rows).
@@ -65,13 +62,7 @@ CHECKS = [
 
 def main() -> None:
     errors = 0  #how many "error" checks failed
-    with psycopg.connect(
-        host="localhost",
-        port=5433,
-        dbname=os.environ["POSTGRES_DB"],
-        user=os.environ["POSTGRES_USER"],
-        password=os.environ["POSTGRES_PASSWORD"],
-    ) as conn:
+    with get_connection() as conn:
         for description, severity, sql in CHECKS:
             bad_rows = conn.execute(sql).fetchone()[0] #fetchone() = first row; [0] = first column
             if bad_rows == 0:
