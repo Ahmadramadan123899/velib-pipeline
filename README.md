@@ -37,11 +37,17 @@ Montmartre and Belleville / Ménilmontant: areas where people live, and on top o
 People ride down to work in the morning, but very few ride back up. The full stations are
 in the center and in the lower, flatter parts of the city.
 
-**I can't say anything about weekends yet.** The pipeline started on a Sunday at 17h,
-so the only weekend data I have is one Sunday evening. I need a few full weekends before
-comparing them with weekdays.
+The Excel report says the same thing. Of the 10 stations most often empty on weekday mornings
+(8h to 10h), almost all are on a hill: Lacépède - Monge near the Panthéon (empty 100% of the
+time), Lepic and Tardieu - Chappe on Montmartre, Pyrénées - Ménilmontant in Belleville...
+The one exception is Place de la République, which is flat but is a big metro hub.
 
-These numbers are from the first few days only, so they will change as more data comes in.
+**Weekends have no morning rush.** At 9h, 5% to 10% of stations are empty on weekdays,
+but only about 3% on Saturday and Sunday. On weekends the busy time is the afternoon
+instead (around 16h), which looks like leisure trips.
+
+These numbers are from the first two weeks only (and one weekend), so they will change as
+more data comes in.
 
 ## The dashboard
 
@@ -59,31 +65,89 @@ at the hour you pick.
 
 ![Station map](docs/dashboard_map.png)
 
+**Page 3: forecast vs reality.**
+For the station you pick: the real number of bikes, the model's prediction and the
+"last hour" baseline, hour by hour over the test period, with the error of each.
+
+![Forecast vs reality](docs/dashboard_forecast.png)
+
 A few things I was careful about:
 
 - Percentages are averaged, never added up.
 - One scale for both lines, starting at 0, so the chart doesn't make small changes look big.
 - Closed stations don't count as empty or full. A closed station with 0 bikes isn't
   "empty", it's just closed.
-- The date and weekend filters are shared by both pages.
+- The date and weekend filters are shared between the first two pages.
 - The built-in map visual needs a work or school Microsoft account, so I used a scatter
   chart with longitude and latitude instead. No streets in the background, but every
   station is in the right place.
+
+## Excel report
+
+`reports/velib_report.xlsx` has two pivot tables, made from a CSV export of the dbt tables:
+
+- **Morning rush:** the 10 stations most often empty on weekdays between 8h and 10h.
+- **Day x hour:** a heatmap of empty stations, one row per day of the week and one column
+  per hour. It shows the weekday rush at 9h and its absence on weekends.
+
+## Predicting bikes one hour ahead
+
+**The question:** at the end of an hour, how many bikes will a station have during the next hour?
+
+**The baseline:** "nothing changes", so next hour = last hour. It's hard to beat: bikes don't
+move much from one hour to the next. Its error is about 1.47 bikes on average (MAE).
+"Same hour yesterday" was much worse (5.4 bikes), partly because the day before a Monday is a Sunday.
+
+**The model:** LightGBM, trained on the past and tested on the last 48 hours (never shuffled:
+in real life you always predict hours you haven't seen). Features: bikes in the last 2 hours,
+the trend, the hour, the day, the station's size, and bikes at the same hour yesterday.
+
+| | Error (bikes) |
+|---|---|
+| Baseline: last hour | 1.47 |
+| LightGBM | 1.37 (7% better) |
+| at 9h (morning rush) | 2.36 → 2.08 |
+| at 18h (evening rush) | 2.22 → 2.00 |
+
+The model is better than the baseline at every hour, and most of all at rush hours, when
+bikes move fast. At night nothing moves, and both are about the same.
+
+What I tried along the way:
+
+- **Predicting the number of bikes directly** only tied the baseline. It was better at rush
+  hour but worse at night, because a tree model can't copy "same as before" exactly.
+  Predicting the **change** (bikes arriving or leaving) fixed it.
+- **A validation set.** I first chose settings by looking at the test results, which makes the
+  final score too optimistic. I added a 24-hour validation period to make choices, and kept the
+  test for the final score only.
+- **The station id** didn't improve the validation score, so I left it out. The model is simpler
+  and works for new stations.
+- **Weather** (rain, temperature, wind from Open-Meteo) didn't help yet. In two weeks there
+  were only about 40 rainy hours. Temperature just replaced the hour of the day (warm afternoon,
+  cold night). I keep collecting it and will test it again with more data.
+
+The predictions are saved in PostgreSQL (`predictions_hourly`) next to the real values,
+and shown on the "Forecast" page of the dashboard.
 
 ## How it works
 
 ```
 Vélib' API  -->  fetch_snapshot.py  -->  data/raw/ (compressed files)
                                               |
+Open-Meteo  -->  fetch_weather.py   --------- | ---------+
+                                              |          |
                                          load_raw.py  -->  PostgreSQL (Docker)
                                                                 |
                                                           dbt models
-                                                    (staging --> marts)
-                                                                |
-                                                           Power BI
+                                                 (staging --> marts --> ml)
+                                                       |              |
+                                                   Power BI     train_model.py
+                                                       ^              |
+                                                       +-- predictions_hourly
 ```
 
-Fetching and loading run every 5 minutes with Windows Task Scheduler.
+Fetching and loading Vélib' data run every 5 minutes, and the weather every hour,
+with Windows Task Scheduler.
 
 ### 1. Getting the data
 
@@ -97,6 +161,11 @@ Each run saves both answers exactly as they come, compressed, in one folder per 
 ```
 data/raw/station_status/2026-10-25/T150958Z.json.gz
 ```
+
+`fetch_weather.py` gets the hourly weather in Paris from Open-Meteo (free, no key):
+temperature, rain, wind and clouds. It saves the raw answer the same way, then writes it to
+`weather_hourly`. Each run asks for the last 14 days again. That way it fills any hole if
+my laptop was off, and old forecasts get replaced by what was really measured.
 
 ### 2. Loading into PostgreSQL
 
@@ -119,22 +188,34 @@ dbt builds clean tables from the raw ones, in a separate `analytics` schema, so 
 data is never touched.
 
 - **Staging** (views): light cleaning. Clearer column names, Paris time next to UTC,
-  a flag for stations that haven't reported in 24 hours, and a flag for closed stations.
+  a flag for stations that haven't reported in 24 hours, a flag for closed stations,
+  and the weather.
 - **Marts** (tables), the ones the dashboard and the model use:
   - `dim_stations`: one row per station, with its real capacity and a flag for dead stations
   - `fct_station_hourly`: one row per station per hour: average bikes, % of time empty,
     % of time full, % of time closed, how full the station was
+- **ML** (table): `ml_training_hourly`, one row per station and target hour, with only what
+  is known before that hour (bikes 1h, 2h and 24h before, the hour, the day, the weather).
+  The past hours are found by their exact time, not by "the previous row", so a gap in the
+  data never gets mistaken for the hour before.
 
 Dead stations are removed in dbt, not in the dashboard, so every report built on these
 tables gets the same numbers.
 
 There are 17 dbt tests: no missing ids, no duplicates, every station in the status data
-exists in the station list, percentages between 0 and 100, and one row per station per hour.
+exists in the station list, percentages between 0 and 100, one row per station per hour,
+and one row per hour of weather.
 
-### 4. Dashboard
+### 4. Model
 
-Power BI reads the two marts (Import mode) and links them by `station_id`. The dashboard
-doesn't refresh by itself yet: I run `dbt build`, then click Refresh in Power BI.
+`train_model.py` reads `ml_training_hourly`, trains LightGBM on the past, picks settings on a
+24-hour validation period and scores the last 48 hours. It then replaces the old predictions in
+`predictions_hourly` in one transaction, using `COPY` (much faster than 70,000 inserts).
+
+### 5. Dashboard
+
+Power BI reads the marts and the predictions (Import mode) and links them by `station_id`.
+The dashboard doesn't refresh by itself yet: I run `dbt build`, then click Refresh in Power BI.
 
 ### Some choices I made
 
@@ -151,6 +232,9 @@ doesn't refresh by itself yet: I run `dbt build`, then click Refresh in Power BI
   it can show up in the status feed first. I didn't want that to block the whole load,
   so I check it with a test instead. This actually happened: a new station appeared
   and nothing broke.
+- **Weather rows can be updated, station rows can't.** A Vélib' snapshot never changes once
+  it's taken. A weather hour does: first it's a forecast, then a measurement. So the weather
+  table keeps the newest value for each hour.
 
 ## Things I found in the data
 
@@ -195,26 +279,37 @@ The fetch line was written twice in `run_fetch.bat`, so every run saved two snap
 second apart. The data itself was fine (just duplicated), but it took twice the space and
 made the "12 snapshots per hour" count wrong. I removed the extra line.
 
+The same check showed a day with fewer snapshots than expected: the scheduled task was set
+to stop when my laptop runs on battery. I turned that off.
+
 ## Project structure
 
 ```
 velib-pipeline/
 ├── src/
-│   ├── fetch_snapshot.py   # downloads and saves one snapshot
+│   ├── fetch_snapshot.py   # downloads and saves one Vélib' snapshot
 │   ├── load_raw.py         # loads new raw files into PostgreSQL
-│   └── check_quality.py    # data quality checks
+│   ├── check_quality.py    # data quality checks
+│   ├── fetch_weather.py    # gets the Paris weather and saves it
+│   └── train_model.py      # trains the model and saves its predictions
 ├── sql/
-│   └── 001_create_tables.sql
+│   ├── 001_create_tables.sql
+│   ├── 002_create_weather.sql
+│   └── 003_create_predictions.sql
 ├── velib_dbt/              # dbt project
 │   ├── models/staging/     # light cleaning (views)
 │   ├── models/marts/       # final tables
+│   ├── models/ml/          # training table for the model
 │   └── tests/              # custom tests
 ├── dashboard/
 │   └── velib.pbix          # Power BI dashboard
+├── reports/
+│   └── velib_report.xlsx   # Excel pivot report
 ├── docs/                   # dashboard screenshots
 ├── docker-compose.yml      # PostgreSQL in Docker
 ├── .env.example            # database settings to copy into .env
 ├── run_fetch.bat           # what Task Scheduler runs every 5 minutes
+├── run_weather.bat         # what Task Scheduler runs every hour
 ├── requirements.txt
 ├── data/                   # raw files (not on GitHub)
 └── logs/                   # run logs (not on GitHub)
@@ -238,13 +333,16 @@ Start the database (set your own password in `.env` first):
 copy .env.example .env
 docker compose up -d
 docker exec -i velib-postgres psql -U velib -d velib < sql\001_create_tables.sql
+docker exec -i velib-postgres psql -U velib -d velib < sql\002_create_weather.sql
+docker exec -i velib-postgres psql -U velib -d velib < sql\003_create_predictions.sql
 ```
 
-Get one snapshot, load it and check it:
+Get one snapshot and the weather, load them and check them:
 
 ```
 python src\fetch_snapshot.py
 python src\load_raw.py
+python src\fetch_weather.py
 python src\check_quality.py
 ```
 
@@ -255,10 +353,17 @@ cd velib_dbt
 dbt build
 ```
 
-To run the pipeline every 5 minutes (change the path to where you cloned it):
+Train the model and save its predictions (it needs a few days of data first):
+
+```
+python src\train_model.py
+```
+
+To run the pipeline on a schedule (change the paths to where you cloned it):
 
 ```
 schtasks /create /tn "VelibFetch" /tr "C:\path\to\velib-pipeline\run_fetch.bat" /sc minute /mo 5
+schtasks /create /tn "VelibWeather" /tr "C:\path\to\velib-pipeline\run_weather.bat" /sc hourly
 ```
 
 To see the dashboard, open `dashboard/velib.pbix` in Power BI Desktop. It connects to
@@ -270,9 +375,12 @@ To see the dashboard, open `dashboard/velib.pbix` in Power BI Desktop. It connec
 - [x] Load it into PostgreSQL (running in Docker) and add data quality checks
 - [x] Build clean tables with dbt
 - [x] Make a dashboard in Power BI: when and where stations run empty or full
-- [ ] Predict the number of bikes per station one hour ahead (with the weather)
-- [ ] Later: Airflow, tests, CI
+- [x] Predict the number of bikes per station one hour ahead
+- [ ] Run everything on a schedule with Airflow (no more manual `dbt build`)
+- [ ] Python tests and CI with GitHub Actions
+- [ ] Test the weather again with more data
 
-## Data source
+## Data sources
 
-Vélib' Métropole open data (GBFS feeds).
+- Vélib' Métropole open data (GBFS feeds)
+- Weather: [Open-Meteo](https://open-meteo.com/) (free, no API key)

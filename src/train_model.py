@@ -6,6 +6,7 @@ import pandas as pd  # tables in Python
 import psycopg  # PostgreSQL driver
 from dotenv import load_dotenv  # loads .env into environment variables
 from sklearn.metrics import mean_absolute_error  # MAE = average error in bikes
+from datetime import datetime, timezone  # when the model was trained
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent  # src/ -> project root
 load_dotenv(PROJECT_ROOT / ".env")  # same database settings as load_raw.py
@@ -80,6 +81,34 @@ def split_by_time(df: pd.DataFrame):
     test = df[df["target_hour_utc"] > test_start]
     return train, valid, test
 
+def save_predictions(test: pd.DataFrame, pred: pd.Series) -> None:
+    """Replace the old predictions with the new ones, all at once."""
+    model_run_at = datetime.now(timezone.utc)
+    rows = zip(
+        test["station_id"].astype(int),  # category -> normal number
+        test["target_hour_utc"],
+        pred,  # model
+        test["bikes_last_hour"],  # baseline
+        test[TARGET],  # truth
+    )
+    with psycopg.connect(
+        host="localhost",
+        port=5433,
+        dbname=os.environ["POSTGRES_DB"],
+        user=os.environ["POSTGRES_USER"],
+        password=os.environ["POSTGRES_PASSWORD"],
+    ) as conn:
+        with conn.transaction():  # delete + insert together: never an empty table halfway
+            conn.execute("DELETE FROM predictions_hourly")
+            with conn.cursor() as cur:
+                # COPY = PostgreSQL's fast bulk load, much faster than 70,000 INSERTs
+                with cur.copy(
+                    "COPY predictions_hourly (station_id, target_hour_utc, predicted_bikes, "
+                    "baseline_bikes, actual_bikes, model_run_at) FROM STDIN"
+                ) as copy:
+                    for station_id, hour, p, b, a in rows:
+                        copy.write_row((int(station_id), hour.to_pydatetime(), float(p), float(b), float(a), model_run_at))
+    print(f"\nSaved {len(test):,} predictions to predictions_hourly")
 
 def main() -> None:
     df = prepare(load_data())
@@ -137,6 +166,7 @@ def main() -> None:
     importance = pd.Series(model.feature_importances_, index=FEATURES).sort_values(ascending=False)
     print("\nFeature importance:")
     print(importance.to_string())
+    save_predictions(test, pred)
 
 
 if __name__ == "__main__":
