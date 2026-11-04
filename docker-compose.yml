@@ -17,6 +17,30 @@ services:                                  # the list of containers in this proj
     volumes:
       - pgdata:/var/lib/postgresql/data    # store the database files in the "pgdata" volume, so data survives restarts
     restart: unless-stopped                # start again automatically when Docker starts, unless you stopped it yourself
+  airflow:
+    build:                                 # build our own image from the Dockerfile
+      context: .                           # the project folder (so COPY can find airflow/...)
+      dockerfile: airflow/Dockerfile
+    container_name: velib-airflow
+    command: standalone                    # all Airflow parts in one container (fine for one person)
+    env_file: .env                         # POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB for our scripts
+    environment:
+      POSTGRES_HOST: postgres              # inside Docker, the database is the "postgres" service...
+      POSTGRES_PORT: "5432"                # ...on its normal port (5433 is only on your PC)
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/airflow
+      AIRFLOW__CORE__DAGS_FOLDER: /opt/velib/airflow/dags
+      AIRFLOW__CORE__LOAD_EXAMPLES: "False"                 # no demo DAGs
+      AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_ALL_ADMINS: "True" # no login page (local only!)
+    volumes:
+      - .:/opt/velib                       # our project folder, live: edit a DAG on Windows, Airflow sees it
+      - airflow_home:/opt/airflow          # Airflow's logs survive restarts
+    ports:
+      - "8080:8080"                        # the Airflow website: http://localhost:8080
+    depends_on:
+      - postgres                           # start the database first
+    restart: unless-stopped
 
 volumes:
-  pgdata:                                  # declare the named volume; Docker manages where it lives
+  pgdata:                                    # declare the named volume; Docker manages where it lives
+  airflow_home:                            # Airflow's own files (logs)
