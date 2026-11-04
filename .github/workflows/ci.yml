@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches: [main]      # every push to main
+  pull_request:           # and every pull request
+
+jobs:
+  test:
+    runs-on: ubuntu-latest      # a fresh Linux machine from GitHub, free for public repos
+    steps:
+      - uses: actions/checkout@v4          # 1. get the code
+      - uses: actions/setup-python@v5      # 2. install Python
+        with:
+          python-version: "3.12"           # same as the Airflow image
+          cache: pip
+          cache-dependency-path: airflow/requirements-pipeline.txt
+
+      # 3. same libraries as Airflow (requirements.txt is a Windows freeze, it may not install on Linux)
+      - run: pip install -r airflow/requirements-pipeline.txt pytest
+
+      # 4. the Python tests
+      - run: pytest -v
+
+      # 5. check the dbt project is valid (SQL, Jinja, YAML) without a database
+      - name: dbt parse
+        working-directory: velib_dbt
+        env:
+          POSTGRES_USER: ci         # fake values: parse never connects,
+          POSTGRES_PASSWORD: ci     # but profiles.yml needs the variables to exist
+          POSTGRES_DB: ci
+        run: dbt parse --profiles-dir .
